@@ -336,4 +336,6 @@ if __name__ == '__main__':
     if cartridges:
         print("墨盒信息:")
         for cartridge in cartridges:
-            print(f"  {cartridge['color_name']}: {cartridge['level'
+            print(f"  {cartridge['color_name']}: {cartridge['level']}% - {cartridge['status']}")
+    else:
+        print("无法获取墨盒信息")
