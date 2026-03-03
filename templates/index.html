@@ -304,6 +304,24 @@
                 });
             }
 
+            // 为label元素添加点击事件，防止事件冒泡
+            const labelElement = uploadState?.querySelector('label');
+            if (labelElement) {
+                labelElement.addEventListener('click', (e) => {
+                    // label会自动触发fileInput的click()，这里只需要阻止冒泡
+                    e.stopPropagation();
+                });
+            }
+
+            // 点击上传区域触发文件选择（避免重复触发）
+            if (uploadState) {
+                uploadState.addEventListener('click', (e) => {
+                    if (fileInput) {
+                        fileInput.click();
+                    }
+                });
+            }
+
             // 拖拽事件
             if (uploadPreviewContainer) {
                 uploadPreviewContainer.addEventListener('dragover', (e) => {
@@ -372,15 +390,56 @@
                 await loadFiles();
                 await detectPDFSupport();
 
-                // 打印机列表加载完成后，加载打印机信息
-                await loadPrinterQueue();
-                await loadPrinterTrayInfo();
-                await loadPrinterInkInfo();
+                // 延迟加载打印机信息，确保打印机已选择
+                setTimeout(async () => {
+                    console.log('开始加载打印机信息...');
+                    await loadPrinterQueue();
+                    await loadPrinterTrayInfo();
+                    await loadPrinterInkInfo();
+                    console.log('打印机信息加载完成');
+                }, 1000);
             })();
 
-            setInterval(loadJobs, 5000);
-            setInterval(loadFiles, 10000);
-            setInterval(loadPrinterQueue, 10000);
+            // 添加错误处理的定时器
+            setInterval(() => {
+                try {
+                    loadJobs();
+                } catch (e) {
+                    console.error('定时加载任务失败:', e);
+                }
+            }, 5000);
+
+            setInterval(() => {
+                try {
+                    loadFiles();
+                } catch (e) {
+                    console.error('定时加载文件失败:', e);
+                }
+            }, 10000);
+
+            setInterval(() => {
+                try {
+                    loadPrinterQueue();
+                } catch (e) {
+                    console.error('定时加载队列失败:', e);
+                }
+            }, 10000);
+
+            setInterval(() => {
+                try {
+                    loadPrinterTrayInfo();
+                } catch (e) {
+                    console.error('定时加载纸盒信息失败:', e);
+                }
+            }, 10000);
+
+            setInterval(() => {
+                try {
+                    loadPrinterInkInfo();
+                } catch (e) {
+                    console.error('定时加载墨盒信息失败:', e);
+                }
+            }, 10000);
         });
 
         function detectPDFSupport() {
@@ -666,13 +725,23 @@
         }
 
         async function loadPrinters() {
+            console.log('开始加载打印机列表...');
             try {
                 const response = await fetch('/api/printers');
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP 错误: ${response.status}`);
+                }
+                
                 const data = await response.json();
                 const select = document.getElementById('printerSelect');
-                if (!select) return;
+                if (!select) {
+                    console.error('找不到打印机选择器元素');
+                    return;
+                }
 
                 select.innerHTML = '';
+                
                 if (data.printers && data.printers.length > 0) {
                     data.printers.forEach(printer => {
                         const option = document.createElement('option');
@@ -683,16 +752,29 @@
 
                     // 自动选择第一台打印机
                     select.selectedIndex = 0;
+                    console.log(`成功加载 ${data.printers.length} 台打印机`);
                 } else {
                     const option = document.createElement('option');
                     option.value = '';
                     option.textContent = '未检测到打印机';
                     select.appendChild(option);
+                    console.log('未检测到可用打印机');
                 }
                 updatePrintButton();
             } catch (error) {
                 console.error('加载打印机失败:', error);
+                // 即使出错，也要更新 UI
+                const select = document.getElementById('printerSelect');
+                if (select) {
+                    select.innerHTML = '';
+                    const option = document.createElement('option');
+                    option.value = '';
+                    option.textContent = `加载失败: ${error.message}`;
+                    select.appendChild(option);
+                }
+                showToast('加载打印机列表失败，请检查网络连接', 'error');
             }
+            console.log('打印机列表加载完成');
         }
 
         async function loadPrinterQueue() {
@@ -795,6 +877,8 @@
             if (!printerSelect || !printerTrayInfo) return;
 
             const selectedPrinter = printerSelect.value;
+            console.log('loadPrinterTrayInfo - selectedPrinter:', selectedPrinter);
+
             if (!selectedPrinter) {
                 printerTrayInfo.innerHTML = '<p class="text-gray-500 text-center">请先选择打印机</p>';
                 return;
@@ -806,11 +890,18 @@
 
                 if (data.error) {
                     printerTrayInfo.innerHTML = `
-                        <div class="flex items-center gap-2 text-red-500">
-                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
-                            </svg>
-                            <span>获取纸盒信息失败</span>
+                        <div class="p-4 bg-red-50 border border-red-200 rounded-lg">
+                            <div class="flex items-center gap-2 text-red-600 font-medium mb-2">
+                                <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                                </svg>
+                                <span>获取纸盒信息失败</span>
+                            </div>
+                            <div class="text-sm text-red-700">
+                                <p class="font-medium mb-1">错误详情:</p>
+                                <pre class="bg-red-100 p-2 rounded text-xs overflow-auto max-h-40">${data.error}</pre>
+                                ${data.details ? `<pre class="bg-red-100 p-2 rounded text-xs mt-2 overflow-auto max-h-40">${data.details}</pre>` : ''}
+                            </div>
                         </div>
                     `;
                     return;
@@ -819,22 +910,62 @@
                 // 显示纸盒信息
                 if (data.trays && data.trays.length > 0) {
                     const traysHtml = data.trays.map(tray => {
-                        // 根据纸张余量设置颜色
-                        let levelColor = 'text-green-600';
-                        if (tray.paper_level === '低' || tray.paper_level === 'Low') {
-                            levelColor = 'text-yellow-600';
-                        } else if (tray.paper_level === '空' || tray.paper_level === 'Empty') {
-                            levelColor = 'text-red-600';
+                        // 适配新旧两种格式
+                        // 新格式: { name, type, status_cn, status, media_ready }
+                        // 旧格式: { tray_name, paper_size, paper_type, paper_level, status }
+                        
+                        let name = '';
+                        let type = '';
+                        let status = '';
+                        let statusClass = '';
+                        let mediaReady = '';
+
+                        if (tray.name) {
+                            // 新格式
+                            name = tray.name;
+                            type = tray.type || '未知';
+                            status = tray.status_cn || tray.status || '未知';
+                            mediaReady = tray.media_ready || '未知';
+                            
+                            // 根据状态设置颜色
+                            if (status === '可用' || status === '已装载') {
+                                statusClass = 'text-green-600';
+                            } else if (status === '空') {
+                                statusClass = 'text-red-600';
+                            } else if (status === '未知') {
+                                statusClass = 'text-gray-500';
+                            } else {
+                                statusClass = 'text-yellow-600';
+                            }
+                        } else {
+                            // 旧格式
+                            name = tray.tray_name || '未知';
+                            type = tray.paper_type || '未知';
+                            status = tray.status || '未知';
+                            mediaReady = tray.paper_size || '未知';
+                            
+                            // 根据状态设置颜色
+                            if (status === '正常' || status === 'OK') {
+                                statusClass = 'text-green-600';
+                            } else if (status === '警告' || status === 'Warning') {
+                                statusClass = 'text-yellow-600';
+                            } else if (status === '空' || status === 'Empty') {
+                                statusClass = 'text-red-600';
+                            } else {
+                                statusClass = 'text-gray-500';
+                            }
                         }
 
                         // 根据状态设置图标
                         let statusIcon = '';
-                        if (tray.status === '正常' || tray.status === 'OK') {
+                        if (statusClass === 'text-green-600') {
                             statusIcon = '<svg class="w-4 h-4 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>';
-                        } else if (tray.status === '警告' || tray.status === 'Warning') {
-                            statusIcon = '<svg class="w-4 h-4 text-yellow-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>';
-                        } else {
+                        } else if (statusClass === 'text-yellow-600') {
+                            statusIcon = '<svg class="w-4 h-4 text-yellow-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77-1.333.192 3 1.732 3z"/></svg>';
+                        } else if (statusClass === 'text-red-600') {
                             statusIcon = '<svg class="w-4 h-4 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>';
+                        } else {
+                            statusIcon = '<svg class="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>';
                         }
 
                         return `
@@ -844,11 +975,49 @@
                                         <svg class="w-5 h-5 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
                                         </svg>
+                                        <span class="font-medium">${name}</span>
+                                    </div>
+                                    <div class="flex items-center gap-1">
+                                        ${statusIcon}
+                                        <span class="text-xs ${statusClass}">${status}</span>
+                                    </div>
+                                </div>
+                                <div class="grid grid-cols-2 gap-2 text-xs">
+                                    <div>
+                                        <div class="text-gray-500">纸盒类型</div>
+                                        <div class="font-medium">${type}</div>
+                                    </div>
+                                    <div>
+                                        <div class="text-gray-500">纸张大小</div>
+                                        <div class="font-medium">${mediaReady}</div>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+                        } else if (tray.status === '警告' || tray.status === 'Warning') {
+                            statusIcon = '<svg class="w-4 h-4 text-yellow-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>';
+                            statusClass = 'text-yellow-600';
+                        } else if (tray.status === '未知') {
+                            statusIcon = '<svg class="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>';
+                            statusClass = 'text-gray-500';
+                        } else {
+                            statusIcon = '<svg class="w-4 h-4 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>';
+                            statusClass = 'text-red-600';
+                        }
+
+                        return `
+                            <div class="bg-white border rounded-lg p-3 mb-2">
+                                    <div class="flex items-center justify-between mb-2">
+                                    <div class="flex items-center gap-2">
+                                        <svg class="w-5 h-5 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
+                                        </svg>
                                         <span class="font-medium">${tray.tray_name}</span>
                                     </div>
                                     <div class="flex items-center gap-1">
                                         ${statusIcon}
-                                        <span class="text-xs ${tray.status === '正常' || tray.status === 'OK' ? 'text-green-600' : 'text-red-600'}">${tray.status}</span>
+                                        <span class="text-xs ${statusClass}">${tray.status}</span>
                                     </div>
                                 </div>
                                 <div class="grid grid-cols-3 gap-2 text-xs">
@@ -897,6 +1066,8 @@
             if (!printerSelect || !printerInkInfo) return;
 
             const selectedPrinter = printerSelect.value;
+            console.log('loadPrinterInkInfo - selectedPrinter:', selectedPrinter);
+
             if (!selectedPrinter) {
                 printerInkInfo.innerHTML = '<p class="text-gray-500 text-center">请先选择打印机</p>';
                 return;
@@ -908,11 +1079,18 @@
 
                 if (data.error) {
                     printerInkInfo.innerHTML = `
-                        <div class="flex items-center gap-2 text-red-500">
-                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
-                            </svg>
-                            <span>获取墨盒信息失败</span>
+                        <div class="p-4 bg-red-50 border border-red-200 rounded-lg">
+                            <div class="flex items-center gap-2 text-red-600 font-medium mb-2">
+                                <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                                </svg>
+                                <span>获取墨盒信息失败</span>
+                            </div>
+                            <div class="text-sm text-red-700">
+                                <p class="font-medium mb-1">错误详情:</p>
+                                <pre class="bg-red-100 p-2 rounded text-xs overflow-auto max-h-40">${data.error}</pre>
+                                ${data.details ? `<pre class="bg-red-100 p-2 rounded text-xs mt-2 overflow-auto max-h-40">${data.details}</pre>` : ''}
+                            </div>
                         </div>
                     `;
                     return;
@@ -920,43 +1098,19 @@
 
                 // 检查是否有真实的墨盒信息（非模拟数据）
                 const hasRealInkData = data.source && data.source.includes('真实打印机') && data.cartridges && data.cartridges.length > 0;
-                // 只要有homepage_url且不是真实IPP数据，就可以尝试加载嵌入主页
-                const canLoadEmbed = data.homepage_url && !hasRealInkData;
 
                 console.log('墨盒信息数据源:', data.source);
                 console.log('是否有真实墨盒数据:', hasRealInkData);
-                console.log('homepage_url:', data.homepage_url);
-                console.log('canLoadEmbed:', canLoadEmbed);
 
                 // 如果有真实墨盒数据，直接显示
                 if (hasRealInkData) {
                     console.log('显示真实墨盒数据');
-                    displayInkCartridges(data, printerInkInfo, false);
+                    displayInkCartridges(data, printerInkInfo);
                     return;
                 }
 
-                // 如果有主页URL且没有真实数据，加载嵌入主页
-                if (canLoadEmbed) {
-                    console.log('尝试加载打印机主页:', data.homepage_url);
-                    try {
-                        const embedResponse = await fetch(`/api/printer-embed/${encodeURIComponent(selectedPrinter)}`);
-                        const embedData = await embedResponse.json();
-
-                        console.log('嵌入主页响应:', embedData);
-
-                        if (embedData.embed_available) {
-                            displayEmbeddedHomepage(embedData, data, printerInkInfo);
-                            return;
-                        } else {
-                            console.warn('嵌入主页不可用:', embedData.note || embedData.error);
-                        }
-                    } catch (error) {
-                        console.error('加载打印机主页失败:', error);
-                    }
-                }
-
-                // 如果嵌入也失败，显示标准墨盒信息（可能是模拟数据）
-                displayInkCartridges(data, printerInkInfo, canLoadEmbed);
+                // 显示标准墨盒信息（可能包含模拟数据）
+                displayInkCartridges(data, printerInkInfo);
 
             } catch (error) {
                 console.error('加载墨盒信息失败:', error);
@@ -972,36 +1126,48 @@
         }
 
         // 显示墨盒列表（标准显示）
-        function displayInkCartridges(data, container, canLoadHomepage) {
+        function displayInkCartridges(data, container) {
             if (data.cartridges && data.cartridges.length > 0) {
                 const cartridgesHtml = data.cartridges.map(cartridge => {
-                    // 根据墨盒颜色设置颜色
-                    let colorClass = '';
+                    // 适配新旧两种格式
+                    // 新格式: { name, color: '#000000', type, level }
+                    // 旧格式: { color: 'black', color_name, level, status }
+                    
                     let colorHex = '';
-                    switch(cartridge.color) {
-                        case 'black':
-                            colorClass = 'bg-gray-800';
-                            colorHex = '#1f2937';
-                            break;
-                        case 'cyan':
-                            colorClass = 'bg-cyan-500';
-                            colorHex = '#06b6d4';
-                            break;
-                        case 'magenta':
-                            colorClass = 'bg-pink-500';
-                            colorHex = '#ec4899';
-                            break;
-                        case 'yellow':
-                            colorClass = 'bg-yellow-500';
-                            colorHex = '#eab308';
-                            break;
-                        case 'color':
-                            colorClass = 'bg-gradient-to-r from-cyan-500 via-pink-500 to-yellow-500';
-                            colorHex = 'linear-gradient(90deg, #06b6d4, #ec4899, #eab308)';
-                            break;
-                        default:
-                            colorClass = 'bg-gray-500';
-                            colorHex = '#6b7280';
+                    let colorName = '';
+                    let level = 0;
+                    let status = '正常';
+
+                    if (cartridge.color && cartridge.color.startsWith('#')) {
+                        // 新格式
+                        colorHex = cartridge.color;
+                        colorName = cartridge.name || '未知';
+                        level = cartridge.level || 0;
+                        status = level > 20 ? '正常' : (level > 0 ? '警告' : '空');
+                    } else {
+                        // 旧格式
+                        switch(cartridge.color) {
+                            case 'black':
+                                colorHex = '#1f2937';
+                                break;
+                            case 'cyan':
+                                colorHex = '#06b6d4';
+                                break;
+                            case 'magenta':
+                                colorHex = '#ec4899';
+                                break;
+                            case 'yellow':
+                                colorHex = '#eab308';
+                                break;
+                            case 'color':
+                                colorHex = 'linear-gradient(90deg, #06b6d4, #ec4899, #eab308)';
+                                break;
+                            default:
+                                colorHex = '#6b7280';
+                        }
+                        colorName = cartridge.color_name || cartridge.color || '未知';
+                        level = cartridge.level || 0;
+                        status = cartridge.status || '正常';
                     }
 
                     // 根据余量设置进度条颜色
@@ -1026,12 +1192,12 @@
                         <div class="bg-white border rounded-lg p-3 mb-2">
                             <div class="flex items-center justify-between mb-2">
                                 <div class="flex items-center gap-2">
-                                    <div class="w-4 h-4 rounded ${colorClass}"></div>
-                                    <span class="font-medium">${cartridge.color_name}</span>
+                                    <div class="w-4 h-4 rounded" style="background: ${colorHex.startsWith('linear') ? colorHex : colorHex}"></div>
+                                    <span class="font-medium">${colorName}</span>
                                 </div>
                                 <div class="flex items-center gap-1">
                                     ${statusIcon}
-                                    <span class="text-xs ${cartridge.status === '正常' || cartridge.status === 'OK' ? 'text-green-600' : 'text-red-600'}">${cartridge.status}</span>
+                                    <span class="text-xs ${statusClass}">${status}</span>
                                 </div>
                             </div>
                             <div class="flex items-center gap-2">
@@ -1046,8 +1212,11 @@
 
                 // 添加数据来源说明
                 let sourceNote = '';
+                if (data.source) {
+                    sourceNote = `<div class="text-xs text-gray-500 mt-2 text-center">${data.source}</div>`;
+                }
                 if (data.note) {
-                    sourceNote = `<div class="text-xs text-gray-500 mt-2 text-center">${data.note}</div>`;
+                    sourceNote += `<div class="text-xs text-gray-500 mt-1 text-center">${data.note}</div>`;
                 }
 
                 container.innerHTML = `
@@ -1063,76 +1232,6 @@
                     </div>
                 `;
             }
-        }
-
-        // 显示嵌入的打印机主页
-        function displayEmbeddedHomepage(embedData, inkData, container) {
-            const homepageUrl = embedData.homepage_url;
-            console.log('嵌入主页数据:', embedData);
-            console.log('method:', embedData.method);
-            console.log('cache_file:', embedData.cache_file);
-
-            let iframeContent = '';
-
-            // 优先使用缓存文件（这样相对路径能正确解析）
-            if (embedData.method === 'direct_embed' && embedData.cache_file) {
-                // 从缓存文件路径提取文件名
-                const cacheFileName = embedData.cache_file.split('/').pop();
-                const cacheUrl = `/printer-cache/${cacheFileName}`;
-
-                console.log('使用缓存文件:', cacheUrl);
-
-                iframeContent = `
-                    <iframe
-                        src="${cacheUrl}"
-                        class="w-full h-64 border rounded-lg"
-                        sandbox="allow-same-origin allow-scripts"
-                    ></iframe>
-                `;
-            } else if (embedData.method === 'direct_embed' && embedData.html_content) {
-                // 备选方案：直接嵌入HTML内容（但相对路径可能失效）
-                console.warn('使用srcdoc嵌入，相对路径可能无法加载');
-                iframeContent = `
-                    <iframe
-                        srcdoc="${embedData.html_content.replace(/"/g, '&quot;')}"
-                        class="w-full h-64 border rounded-lg"
-                        sandbox="allow-same-origin allow-scripts"
-                    ></iframe>
-                `;
-            } else {
-                // 错误情况：不应该走到这里
-                console.error('错误：embedData.method不是direct_embed，且没有cache_file');
-                console.error('embedData:', embedData);
-                iframeContent = `
-                    <div class="p-4 border rounded-lg bg-red-50 text-red-700">
-                        <p>错误：无法加载打印机主页</p>
-                        <p class="text-sm">方法: ${embedData.method || '未知'}</p>
-                        <p class="text-sm">错误信息: ${embedData.note || embedData.error || '无'}</p>
-                    </div>
-                `;
-            }
-
-            container.innerHTML = `
-                <div class="space-y-2">
-                    <div class="flex items-center justify-between">
-                        <span class="text-sm font-medium text-gray-700">打印机主页</span>
-                        <button
-                            onclick="loadPrinterInkInfo()"
-                            class="text-xs text-blue-600 hover:text-blue-800"
-                            title="刷新"
-                        >
-                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                            </svg>
-                        </button>
-                    </div>
-                    ${iframeContent}
-                    <div class="text-xs text-gray-500 mt-2 text-center">
-                        墨盒信息来自打印机主页
-                        <a href="${homepageUrl}" target="_blank" class="text-blue-600 hover:underline">在新窗口打开</a>
-                    </div>
-                </div>
-            `;
         }
 
         async function loadFiles() {
